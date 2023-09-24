@@ -205,7 +205,6 @@ public:
     inline bool DoSimplification(SimplificationMode mode, int targetFaceCount) {
         QEM_DEBUG("DoSimplification(mode=%d, targetFaceCount=%d)", mode, targetFaceCount);
         // TODO: implement this
-
         return true;
     }
 

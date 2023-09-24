@@ -27,13 +27,22 @@
 
 
 Mesh MeshReduction::Reduction(const Mesh &mesh, float ratio)
-{
+{	
+	int verNum = mesh.V.size();
+	for (int i = 0; i < verNum; ++i)
+	{
+
+	}
+
+
+
+
+	//-------------
 	QEM qem;
 	qem.ImportMesh(mesh);
 	// TODO: implement me
 	int targetCount = std::ceil(mesh.F.rows() * ratio);
 	qem.DoSimplification(QEM::SimplificationMode::Position, targetCount);
-
 	Mesh outputMesh = qem.ExportMesh();
 	outputMesh.texture = mesh.texture;
 	return outputMesh;

@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(GAMES106-HW5)
 
-option(QEM_USE_OPENMESH "Link in OpenMesh to be used by QEM algorithm" OFF)
-option(QEM_USE_UHEMESH "Include OpenMesh to be used by QEM algorithm" ON)
+option(QEM_USE_OPENMESH "Link in OpenMesh to be used by QEM algorithm" ON)
+option(QEM_USE_UHEMESH "Include OpenMesh to be used by QEM algorithm" OFF)
 
 list(PREPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
