@@ -1,10 +1,16 @@
 #pragma once
 
 #include "assimp_helper.h"
-
+#include <unordered_map>
+#include <vector>
+using namespace std;
 class MeshReduction
 {
+
 public:
+    
+
+
 	// Task 1: Mesh reduction
 	static Mesh Reduction(const Mesh& mesh, float ratio);
 

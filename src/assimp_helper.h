@@ -48,7 +48,13 @@ struct Mesh
 	// Conflicts with the wireframe, recommend to toggle wireframe off while using this
 	using EdgeTuple = std::tuple<Eigen::Vector3d, Eigen::Vector3d, Eigen::RowVector3d>;
 	std::vector<EdgeTuple> overlayEdges;
+
+	std::vector<Eigen::Vector3d> findVertNeighborFaces(int vertIdx){
+
+	};
 };
+
+
 
 struct Instance
 {
