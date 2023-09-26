@@ -111,6 +111,9 @@ class QEM
 		QEM_DEBUG("DoSimplification(mode=%d, targetFaceCount=%d)", mode, targetFaceCount);
 		// TODO: check validity
 		std::cout << "hello openmesh qem" << endl;
+		heMesh.request_face_status();
+		heMesh.request_edge_status();
+		heMesh.request_vertex_status();
 		OpenMesh::VPropHandleT<Eigen::Matrix4d> vertMatrixProp;        
 		heMesh.add_property(vertMatrixProp);
 		//遍历顶点求kp矩阵
@@ -129,7 +132,8 @@ class QEM
 
 		// error new-vertex-position
 		OpenMesh::EPropHandleT<std::pair<double,Eigen::Vector4d>> edgeMatrixProp;
-		std::priority_queue<QEMMesh::EdgeHandle, vector<QEMMesh::EdgeHandle>, /* 使用lambda的形式比较*/> heap;
+		heMesh.add_property(edgeMatrixProp);
+		std::priority_queue<std::pair<double, QEMMesh::EdgeHandle>, vector<std::pair<double, QEMMesh::EdgeHandle>>, greater<std::pair<double, QEMMesh::EdgeHandle>>> heap;
 		// 遍历每一条边
 		for (QEMMesh::EdgeIter e_it = heMesh.edges_begin(); e_it != heMesh.edges_end(); ++e_it)
 		{
@@ -137,10 +141,10 @@ class QEM
 
 			// 获取边的两个顶点
 			QEMMesh::HalfedgeHandle halfedge1 = heMesh.halfedge_handle(edge, 0);
-			QEMMesh::HalfedgeHandle halfedge2 = heMesh.halfedge_handle(edge, 1);
+			
 
 			QEMMesh::VertexHandle vertex1 = heMesh.to_vertex_handle(halfedge1);
-			QEMMesh::VertexHandle vertex2 = heMesh.to_vertex_handle(halfedge2);
+			QEMMesh::VertexHandle vertex2 = heMesh.from_vertex_handle(halfedge1);
 
 			// 在这里使用 vertex1 和 vertex2，它们分别是边的两个顶点
 			Eigen::Matrix4d edgeMatrix = heMesh.property(vertMatrixProp, vertex1) + heMesh.property(vertMatrixProp, vertex2);
@@ -154,9 +158,37 @@ class QEM
 			x            = mat.colPivHouseholderQr().solve(b);
 			double error = x.transpose() * edgeMatrix * x;
 			heMesh.property(edgeMatrixProp, edge) = make_pair(error, x);
+			heap.push(make_pair(error, edge));
 		}
 
+		std::cout << "size : " << heap.size()<< endl;
+		
+		//while (!heap.empty())
+		//{
+		//	auto targetEdge = heap.top();
+		//	// TODO 有效性检测
+		//	heap.pop();
+		//	std::cout << targetEdge.first << endl
+		//	          << targetEdge.second.is_valid() << endl;
+		//}
+		
+		auto targetEdge = heap.top();
+		// TODO 有效性检测
+		heap.pop();
+		// 坍缩边
+		QEMMesh::HalfedgeHandle heh1 = heMesh.halfedge_handle(targetEdge.second, 0);
 
+		heMesh.collapse(heh1);
+
+		//while (!heap.empty() && heMesh.n_vertices() > targetFaceCount)
+		//{
+		//	
+		//	// 新顶点
+		//	
+		//	break;
+
+
+		//}
 
 		return true;
 	}
