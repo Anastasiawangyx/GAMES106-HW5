@@ -106,6 +106,33 @@ class QEM
 		return mat;
 	}
 
+	void updataVertexNormal(QEMMesh::VertexHandle vertex)
+	{
+		// 更新顶点周围的法线
+		QEMMesh::Normal updated_normal(0.0, 0.0, 0.0);        // 初始化为零向量
+
+		// 遍历与顶点相邻的面片
+		for (QEMMesh::VertexFaceIter vf_it = heMesh.vf_iter(vertex); vf_it.is_valid(); ++vf_it)
+		{
+			QEMMesh::FaceHandle face = *vf_it;
+
+			// 计算每个面片的法线
+			QEMMesh::Normal face_normal = heMesh.normal(face);
+
+			// 累加法线以计算平均法线
+			updated_normal += face_normal;
+		}
+
+		// 标准化法线以确保它是单位向量
+		if (updated_normal.norm() > 0.0)
+		{
+			updated_normal.normalize();
+		}
+
+		// 更新顶点的法线
+		heMesh.set_normal(vertex, updated_normal);
+	}
+
 	inline bool DoSimplification(SimplificationMode mode, int targetFaceCount)
 	{
 		QEM_DEBUG("DoSimplification(mode=%d, targetFaceCount=%d)", mode, targetFaceCount);
@@ -117,14 +144,12 @@ class QEM
 		OpenMesh::VPropHandleT<Eigen::Matrix4d> vertMatrixProp;        
 		heMesh.add_property(vertMatrixProp);
 		//遍历顶点求kp矩阵
-		for (int i = 0; i < heMesh.n_vertices(); i++)
+		for (auto& vh : heMesh.vertices())
 		{
 			Eigen::Matrix4d mat;
 			mat.setZero();
-			auto vh = heMesh.vertex_handle(i);
-			for (QEMMesh::VertexFaceIter vf_it = heMesh.vf_iter(vh); vf_it.is_valid(); ++vf_it)
+			for (auto& fh : vh.faces())
 			{
-				auto fh = heMesh.face_handle(vf_it);
 				mat += countFaceKPMatrix(fh);
 			}
 			heMesh.property(vertMatrixProp, vh) = mat;
@@ -148,6 +173,7 @@ class QEM
 
 			// 在这里使用 vertex1 和 vertex2，它们分别是边的两个顶点
 			Eigen::Matrix4d edgeMatrix = heMesh.property(vertMatrixProp, vertex1) + heMesh.property(vertMatrixProp, vertex2);
+			//cout << edgeMatrix << endl;
 			Eigen::Matrix4d mat;
 			mat << edgeMatrix(0, 0), edgeMatrix(0, 1), edgeMatrix(0, 2), edgeMatrix(0, 3),
 			       edgeMatrix(0, 1), edgeMatrix(1, 1), edgeMatrix(1, 2), edgeMatrix(1, 3),
@@ -177,9 +203,34 @@ class QEM
 		heap.pop();
 		// 坍缩边
 		QEMMesh::HalfedgeHandle heh1 = heMesh.halfedge_handle(targetEdge.second, 0);
-
+		;
 		heMesh.collapse(heh1);
+		QEMMesh::VertexHandle newVertex = heMesh.to_vertex_handle(heh1);
+		Eigen::Vector3d       pos       = heMesh.property(edgeMatrixProp, heMesh.edge_handle(heh1)).second.segment<3>(0);
+		QEMMesh::Point        p(pos.x(), pos.y(), pos.z());
+		heMesh.set_point(newVertex, p);
+		heMesh.garbage_collection();
+		bool valid = heMesh.is_valid_handle(newVertex);
+		if (valid)
+		{
+			updataVertexNormal(newVertex);
+			Eigen::Matrix4d mat;
+			mat.setZero();
+			for (QEMMesh::VertexFaceIter vf_it = heMesh.vf_iter(newVertex); vf_it.is_valid(); ++vf_it)
+			{
+				mat += countFaceKPMatrix(*vf_it);
+			}
+			heMesh.property(vertMatrixProp, newVertex) = mat;
 
+
+			cout << "valid" << endl;
+		}
+
+		
+
+
+
+		
 		//while (!heap.empty() && heMesh.n_vertices() > targetFaceCount)
 		//{
 		//	
