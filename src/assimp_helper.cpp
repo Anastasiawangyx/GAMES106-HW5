@@ -16,7 +16,6 @@
 
 static Assimp::Importer s_importer;
 static const aiScene   *s_scene;
-
 inline Eigen::Matrix4d convert_matrix(const aiMatrix4x4 &transform)
 {
 	Eigen::Matrix4d ret;
@@ -41,6 +40,7 @@ inline Eigen::Matrix4d convert_matrix(const aiMatrix4x4 &transform)
 
 Scene AssimpHelper::Load(const char *filename, uint32_t flags)
 {
+	
 	Scene scene;
 
 	scene.num_instance   = 0;

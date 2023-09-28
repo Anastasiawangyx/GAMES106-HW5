@@ -93,10 +93,10 @@ struct CompareTupleFirst
 	}
 };
 
-Mesh MeshReduction::Reduction(const Mesh &mesh, float ratio)
+Mesh MeshReduction::Reduction(string file, const Mesh &mesh, float ratio)
 {	
 	QEM qem;
-	qem.ImportMesh(mesh);
+	qem.ImportMesh(file,mesh);
 	// TODO: implement me
 	int targetCount = std::ceil(mesh.F.rows() * ratio);
 	qem.DoSimplification(QEM::SimplificationMode::Position, targetCount);
@@ -105,10 +105,10 @@ Mesh MeshReduction::Reduction(const Mesh &mesh, float ratio)
 	return outputMesh;
 }
 
-Mesh MeshReduction::ReductionWithAppearancePresentation(const Mesh &mesh, float ratio)
+Mesh MeshReduction::ReductionWithAppearancePresentation(string file, const Mesh &mesh, float ratio)
 {
 	QEM qem;
-	qem.ImportMesh(mesh);
+	qem.ImportMesh(file,mesh);
 	// TODO: implement me
 	int targetCount = std::ceil(mesh.F.rows() * ratio);
 	qem.DoSimplification(QEM::SimplificationMode::PositionNormal, targetCount);
@@ -118,10 +118,10 @@ Mesh MeshReduction::ReductionWithAppearancePresentation(const Mesh &mesh, float 
 	return outputMesh;
 }
 
-Mesh MeshReduction::ReductionWithUVMap(const Mesh &mesh, float ratio)
+Mesh MeshReduction::ReductionWithUVMap(string file, const Mesh &mesh, float ratio)
 {
 	QEM qem;
-	qem.ImportMesh(mesh);
+	qem.ImportMesh(file,mesh);
 	// TODO: implement me
 	int targetCount = std::ceil(mesh.F.rows() * ratio);
 	qem.DoSimplification(QEM::SimplificationMode::PositionNormalUV, targetCount);

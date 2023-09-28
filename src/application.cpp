@@ -3,8 +3,8 @@
 
 #include <assimp/postprocess.h>
 #include <igl/opengl/glfw/imgui/ImGuiHelpers.h>
-
-Eigen::RowVector3d GetColor(size_t a)
+string  objfilename;
+   Eigen::RowVector3d GetColor(size_t a)
 {
 	a = (a + 0x7ed55d16) + (a << 12);
 	a = (a ^ 0xc761c23c) ^ (a >> 19);
@@ -67,6 +67,7 @@ void Application::LoadScene()
 				}
 			}
 			std::string filename = igl::file_dialog_open();
+			objfilename          = filename;
 			m_raw_scene          = AssimpHelper::Load(filename.c_str(), flags);
 			m_scene              = m_raw_scene;
 			UpdateSceneViewer();
@@ -259,13 +260,13 @@ void Application::EditScene()
 				switch (m_reduction_config)
 				{
 					case ReductionConfig::Reduction:
-						m_scene.meshes[i] = MeshReduction::Reduction(m_raw_scene.meshes[i], m_reduction_ratio);
+						m_scene.meshes[i] = MeshReduction::Reduction(objfilename,m_raw_scene.meshes[i], m_reduction_ratio);
 						break;
 					case ReductionConfig::ReductionWithAppearancePresentation:
-						m_scene.meshes[i] = MeshReduction::ReductionWithAppearancePresentation(m_raw_scene.meshes[i], m_reduction_ratio);
+						m_scene.meshes[i] = MeshReduction::ReductionWithAppearancePresentation(objfilename,m_raw_scene.meshes[i], m_reduction_ratio);
 						break;
 					case ReductionConfig::ReductionWithUVMap:
-						m_scene.meshes[i] = MeshReduction::ReductionWithUVMap(m_raw_scene.meshes[i], m_reduction_ratio);
+						m_scene.meshes[i] = MeshReduction::ReductionWithUVMap(objfilename,m_raw_scene.meshes[i], m_reduction_ratio);
 						break;
 					default:
 						break;
