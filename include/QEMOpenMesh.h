@@ -122,13 +122,17 @@ class QEM
 	// 计算每一个面对应的Kp矩阵
 	Eigen::Matrix4d countFaceKPMatrix(QEMMesh::FaceHandle fh)
 	{
-		auto normal = heMesh.normal(fh);
-		normal.normalize();
+		const auto &n = heMesh.normal(fh);
+
+		const double            a        = n[0];
+		const double            b        = n[1];
+		const double            c        = n[2];
+		
 		QEMMesh::FaceVertexIter fv_it  = heMesh.fv_iter(fh);
 		QEMMesh::VertexHandle   vert   = *fv_it;
 		QEMMesh::Point          position = heMesh.point(vert);
-		double                  d        = -(normal[0] * position[0] + normal[1] * position[1] + normal[2] * position[2]);
-		Eigen::Vector4d         p(normal[0], normal[1], normal[2], d);
+		const double            d        = -(heMesh.point(vert)| n);
+		Eigen::Vector4d         p(a,b,c,d);
 		Eigen::Matrix4d         mat = p * p.transpose();
 		return mat;
 	}
@@ -145,44 +149,104 @@ class QEM
 		}
 		return mat;
 	}
-
-	void updataVertexNormal(QEMMesh::VertexHandle vertex)
+	//检车矩阵是否可逆
+	bool checkInvertible(Eigen::Matrix4d mat)
 	{
-		// 更新顶点周围的法线
-		QEMMesh::Normal updated_normal(0.0, 0.0, 0.0);        // 初始化为零向量
-
-		// 遍历与顶点相邻的面片
-		for (QEMMesh::VertexFaceIter vf_it = heMesh.vf_iter(vertex); vf_it.is_valid(); ++vf_it)
-		{
-			QEMMesh::FaceHandle face = *vf_it;
-
-			// 计算每个面片的法线
-			QEMMesh::Normal face_normal = heMesh.normal(face);
-
-			// 累加法线以计算平均法线
-			updated_normal += face_normal;
-		}
-
-		// 标准化法线以确保它是单位向量
-		if (updated_normal.norm() > 0.0)
-		{
-			updated_normal.normalize();
-		}
-
-		// 更新顶点的法线
-		heMesh.set_normal(vertex, updated_normal);
+		Eigen::FullPivLU<Eigen::Matrix4d> lu(mat);
+		if (lu.isInvertible())
+			return true;
+		else
+			return false;
 	}
 
-	inline bool DoSimplification(SimplificationMode mode, int targetFaceCount)
+	bool isFlipped(QEMMesh::VertexHandle v0, QEMMesh::VertexHandle v1, const QEMMesh::Point &ptTarget)
 	{
+		for (auto fIt = heMesh.vf_iter(v0); fIt.is_valid(); ++fIt)
+		{
+			if (heMesh.status(*fIt).deleted())
+			{
+				continue;
+			}
+
+			auto                   vIt = heMesh.fv_iter(*fIt);
+			OpenMesh::VertexHandle fv[3];
+			fv[0] = *vIt;
+			++vIt;
+			fv[1] = *vIt;
+			++vIt;
+			fv[2] = *vIt;
+
+			// ignore the face will be deleted
+			if (fv[0] == v1 || fv[1] == v1 || fv[2] == v1)
+			{
+				continue;
+			}
+
+			int idxV0 = 0;
+			for (int i = 0; i < 3; ++i)
+			{
+				if (fv[i] == v0)
+				{
+					idxV0 = i;
+				}
+			}
+
+			QEMMesh::Point pt0 = heMesh.point(v0);
+			QEMMesh::Point pt1 = heMesh.point(fv[(idxV0 + 1) % 3]);
+			QEMMesh::Point pt2 = heMesh.point(fv[(idxV0 + 2) % 3]);
+
+			QEMMesh::Point dir1 = pt1 - ptTarget;
+			dir1.normalize();
+			QEMMesh::Point dir2 = pt2 - ptTarget;
+			dir2.normalize();
+
+			// The angle below can be adjusted, but now is enough
+			// if the angle between dir1 and dir2 small than 2.6 angle, return true
+			if (fabs(dir1 | dir2) > 0.999)
+				return true;
+
+			QEMMesh::Point normold = heMesh.normal(*fIt);
+			QEMMesh::Point norm    = dir1 % (dir2);
+			norm.normalize();
+
+			// if the angle between normold and norm large than 78.5 angle, return true
+			if ((normold | norm) < 0.2)
+				return true;
+		}
+		return false;
+	}
+	void UpdateFaceNormal(OpenMesh::VertexHandle v0)
+	{
+		if (!heMesh.is_valid_handle(v0) || heMesh.is_isolated(v0))
+		{
+			return;
+		}
+		for (auto fIt = heMesh.vf_iter(v0); fIt.is_valid(); ++fIt)
+		{
+			if (!heMesh.status(*fIt).deleted())
+			{
+				heMesh.set_normal(*fIt, heMesh.calc_face_normal(*fIt));
+			}
+		}
+	}
+	
+	inline bool DoSimplification(SimplificationMode mode, float ratio)
+	{
+		/*------------------init-----------------*/
 		QEM_DEBUG("DoSimplification(mode=%d, targetFaceCount=%d)", mode, targetFaceCount);
-		heMesh.request_face_normals();
-		heMesh.request_vertex_normals();
-		// TODO: check validity
-		std::cout << "hello openmesh qem" << endl;
-		heMesh.request_face_status();
-		heMesh.request_edge_status();
-		heMesh.request_vertex_status();
+		cout << "hello qem" << endl;
+		double dAgressiveness = 7;
+		if (!heMesh.has_vertex_status())
+			heMesh.request_vertex_status();
+		if (!heMesh.has_face_status())
+			heMesh.request_face_status();
+		if (!heMesh.has_edge_status())
+			heMesh.request_edge_status();
+		if (!heMesh.has_face_normals())
+		{
+			heMesh.request_face_normals();
+		}
+		heMesh.update_face_normals();
 		OpenMesh::VPropHandleT<Eigen::Matrix4d> vertMatrixProp;        
 		heMesh.add_property(vertMatrixProp);
 		//遍历顶点求kp矩阵
@@ -214,91 +278,356 @@ class QEM
 			    edgeMatrix(0, 1), edgeMatrix(1, 1), edgeMatrix(1, 2), edgeMatrix(1, 3),
 			    edgeMatrix(0, 2), edgeMatrix(1, 2), edgeMatrix(2, 2), edgeMatrix(2, 3),
 			    0, 0, 0, 1;
-			Eigen::Vector4d b(0, 0, 0, 1);
-			Eigen::Vector4d x;
-			x            = mat.colPivHouseholderQr().solve(b);
-			double error = x.transpose() * edgeMatrix * x;
+			Eigen::Vector4d x(0,0,0,0);
+			double          error = 10000;
+			if (checkInvertible(mat) && !heMesh.is_boundary(edge))
+			{
+				Eigen::Vector4d b(0, 0, 0, 1);
+				x     = mat.inverse() * b;
+				error = x.transpose() * edgeMatrix * x;
+			}
+			else
+			{
+				//如果矩阵不可逆，则取边的两个端点和中点中误差最小的点
+				Eigen::Vector4d v1(heMesh.point(vertex1)[0], heMesh.point(vertex1)[1], heMesh.point(vertex1)[2], 1.0);
+				Eigen::Vector4d v2(heMesh.point(vertex2)[0], heMesh.point(vertex2)[1], heMesh.point(vertex2)[2], 1.0);
+				Eigen::Vector4d vmid = (v1 + v2) / 2;
+				double          e1   = v1.transpose() * edgeMatrix * v1;
+				double          e2   = v2.transpose() * edgeMatrix * v2;
+				double          e3   = vmid.transpose() * edgeMatrix * vmid;
+				if (e1 < error)
+				{
+					error = e1;
+					x     = v1;
+				}
+				if (e2 < error)
+				{
+					error = e2;
+					x     = v2;
+				}
+				if (e3 < error)
+				{
+					error = e3;
+					x     = vmid;
+				}
+			}
 			heMesh.property(edgeMatrixProp, edge) = make_pair(error, x);
 			heap.push(make_pair(error, edge));
 		}
-
+		/*------------------init over-----------------*/
 		
-		auto targetEdge = heap.top();
-		// TODO 有效性检测
-		heap.pop();
-		// 坍缩边
-		QEMMesh::HalfedgeHandle heh1 = heMesh.halfedge_handle(targetEdge.second, 0);
-		QEMMesh::HalfedgeHandle heh2 = heMesh.halfedge_handle(targetEdge.second, 1);
-		
-		
-		cout << "x : " << heMesh.point(heMesh.to_vertex_handle(heh1))[0] << " y: " << heMesh.point(heMesh.to_vertex_handle(heh1))[1] << " z : " << heMesh.point(heMesh.to_vertex_handle(heh1))[2] << endl;
-		cout << "x : " << heMesh.point(heMesh.from_vertex_handle(heh1))[0] << " y: " << heMesh.point(heMesh.from_vertex_handle(heh1))[1] << " z : " << heMesh.point(heMesh.from_vertex_handle(heh1))[2] << endl;
-		heMesh.collapse(heh1);
-		 
-		QEMMesh::VertexHandle newVertex = heMesh.to_vertex_handle(heh1);
-		Eigen::Vector3d       pos       = heMesh.property(edgeMatrixProp, heMesh.edge_handle(heh1)).second.segment<3>(0);
-		QEMMesh::Point        p(pos.x(), pos.y(), pos.z());
-		heMesh.set_point(newVertex, p);
-		cout << "new x : " << pos.x() << " new y : " << pos.y() << " new z : " << pos.z() << endl;
-		heMesh.update_face_normals();
-		heMesh.update_vertex_normals();
-		int cnt = heMesh.n_vertices();
-		while (!heap.empty() && heMesh.n_vertices() > targetFaceCount)
+		size_t nCurCollapses = 0;
+		size_t nCollapses    = heMesh.n_vertices()*(1-ratio) ;
+		cout << "vert:" << heMesh.n_vertices() << " ratio:" << ratio << endl;
+		for (int iteration = 0; iteration < 100; iteration++)
 		{
-			heMesh.property(vertMatrixProp, newVertex) = updateVertexMatrix(newVertex);
-			//更新新顶点周围边的误差
-			for (QEMMesh::VertexEdgeIter e_it = heMesh.ve_iter(newVertex); e_it.is_valid(); ++e_it)
+			if (nCurCollapses >= nCollapses)
 			{
-				QEMMesh::EdgeHandle edge = *e_it;
-				if (heMesh.status(edge).deleted())
-					continue;
-				// 获取边的两个顶点
-				QEMMesh::HalfedgeHandle halfedge1 = heMesh.halfedge_handle(edge, 0);
-				QEMMesh::HalfedgeHandle halfedge2 = heMesh.halfedge_handle(edge, 1);
-
-				QEMMesh::VertexHandle vertex1 = heMesh.to_vertex_handle(halfedge1);
-				QEMMesh::VertexHandle vertex2 = heMesh.from_vertex_handle(halfedge1);
-
-				// 在这里使用 vertex1 和 vertex2，它们分别是边的两个顶点
-				Eigen::Matrix4d edgeMatrix = heMesh.property(vertMatrixProp, vertex1) + heMesh.property(vertMatrixProp, vertex2);
-				// cout << edgeMatrix << endl;
-				Eigen::Matrix4d mat;
-				mat << edgeMatrix(0, 0), edgeMatrix(0, 1), edgeMatrix(0, 2), edgeMatrix(0, 3),
-				    edgeMatrix(0, 1), edgeMatrix(1, 1), edgeMatrix(1, 2), edgeMatrix(1, 3),
-				    edgeMatrix(0, 2), edgeMatrix(1, 2), edgeMatrix(2, 2), edgeMatrix(2, 3),
-				    0, 0, 0, 1;
-				Eigen::Vector4d b(0, 0, 0, 1);
-				Eigen::Vector4d x;
-				x                                     = mat.colPivHouseholderQr().solve(b);
-				double error                          = x.transpose() * edgeMatrix * x;
-				heMesh.property(edgeMatrixProp, edge) = make_pair(error, x);
-				heap.push(make_pair(error, edge));
-			}
-			auto targetEdge = heap.top();
-			// TODO 有效性检测
-			heap.pop();
-			if (heMesh.status(targetEdge.second).deleted())
-				continue;
-
-			heh1 = heMesh.halfedge_handle(targetEdge.second, 0);
-			cout << "x : " << heMesh.point(heMesh.to_vertex_handle(heh1))[0] << " y: " << heMesh.point(heMesh.to_vertex_handle(heh1))[1] << " z : " << heMesh.point(heMesh.to_vertex_handle(heh1))[2] << endl;
-			cout << "x : " << heMesh.point(heMesh.from_vertex_handle(heh1))[0] << " y: " << heMesh.point(heMesh.from_vertex_handle(heh1))[1] << " z : " << heMesh.point(heMesh.from_vertex_handle(heh1))[2] << endl;
-			heMesh.collapse(heh1);
-			--cnt;
-			if (cnt < targetFaceCount)
+				cout << "cur : " << nCurCollapses << " col :" << nCollapses << endl;
 				break;
-			newVertex = heMesh.to_vertex_handle(heh1);
-			Eigen::Vector3d       pos       = heMesh.property(edgeMatrixProp, heMesh.edge_handle(heh1)).second.segment<3>(0);
-			QEMMesh::Point        p(pos.x(), pos.y(), pos.z());
-			heMesh.set_point(newVertex, p);
-			cout << "new x : " << pos.x() << " new y : " << pos.y() << " new z : " << pos.z() << endl;
-			heMesh.update_face_normals();
-			heMesh.update_vertex_normals();
+			}
+				
+			double dThreshold = 0.000000001 * pow(double(iteration + 3), dAgressiveness);
+			for (auto eIt = heMesh.edges_begin(); eIt != heMesh.edges_end(); ++eIt)
+			{
+				if (heMesh.status(*eIt).deleted())
+					continue;
+				if (!heMesh.is_valid_handle(*eIt))
+					continue;
+				if (heMesh.property(edgeMatrixProp, *eIt).first > dThreshold)
+					continue;
+				OpenMesh::HalfedgeHandle h0 = heMesh.halfedge_handle(*eIt, 0);
+				OpenMesh::VertexHandle   v0 = heMesh.from_vertex_handle(h0);
+				OpenMesh::VertexHandle   v1 = heMesh.to_vertex_handle(h0);
 
+				if (heMesh.is_boundary(v0) != heMesh.is_boundary(v1))
+				{
+					continue;
+				}
+				Eigen::Vector4d x = heMesh.property(edgeMatrixProp, *eIt).second;
+				QEMMesh::Point  ptTarget(x[0], x[1], x[2]);
+				if (isFlipped(v0, v1, ptTarget))
+					continue;
+				if (isFlipped(v1, v0, ptTarget))
+					continue;
+
+				auto h1 = heMesh.opposite_halfedge_handle(h0);
+				if (heMesh.is_collapse_ok(h0))
+				{
+					heMesh.collapse(h0);
+					heMesh.point(v1) = ptTarget;
+				}
+				else if (heMesh.is_collapse_ok(h1))
+				{
+					heMesh.collapse(h1);
+					heMesh.point(v0) = ptTarget;
+				}
+				else
+				{
+					continue;
+				}
+				nCurCollapses++;
+				UpdateFaceNormal(v1);
+				UpdateFaceNormal(v0);
+				auto &v0Quadric = heMesh.property(vertMatrixProp, v0);
+				auto &v1Quadric = heMesh.property(vertMatrixProp, v1);
+				heMesh.property(vertMatrixProp, v1) += v0Quadric;
+				heMesh.property(vertMatrixProp, v0) += v1Quadric;
+				// update edge matrix
+				if (heMesh.is_valid_handle(v0) || !heMesh.is_isolated(v0))
+				{
+					double         dError = 0;
+					QEMMesh::Point ptResult;
+					for (auto hIt = heMesh.voh_iter(v0); hIt.is_valid(); ++hIt)
+					{
+						OpenMesh::EdgeHandle edge = heMesh.edge_handle(*hIt);
+
+						if (!heMesh.is_valid_handle(*hIt) || heMesh.status(edge).deleted())
+						{
+							continue;
+						}
+						// 获取边的两个顶点
+						QEMMesh::HalfedgeHandle halfedge1 = heMesh.halfedge_handle(edge, 0);
+						QEMMesh::HalfedgeHandle halfedge2 = heMesh.halfedge_handle(edge, 1);
+
+						QEMMesh::VertexHandle vertex1 = heMesh.to_vertex_handle(halfedge1);
+						QEMMesh::VertexHandle vertex2 = heMesh.from_vertex_handle(halfedge1);
+
+						// 在这里使用 vertex1 和 vertex2，它们分别是边的两个顶点
+						Eigen::Matrix4d edgeMatrix = heMesh.property(vertMatrixProp, vertex1) + heMesh.property(vertMatrixProp, vertex2);
+						Eigen::Matrix4d mat;
+						mat << edgeMatrix(0, 0), edgeMatrix(0, 1), edgeMatrix(0, 2), edgeMatrix(0, 3),
+						    edgeMatrix(0, 1), edgeMatrix(1, 1), edgeMatrix(1, 2), edgeMatrix(1, 3),
+						    edgeMatrix(0, 2), edgeMatrix(1, 2), edgeMatrix(2, 2), edgeMatrix(2, 3),
+						    0, 0, 0, 1;
+						Eigen::Vector4d x(0, 0, 0, 0);
+						double          error = 10000;
+						if (checkInvertible(mat) && !heMesh.is_boundary(edge))
+						{
+							Eigen::Vector4d b(0, 0, 0, 1);
+							x     = mat.inverse() * b;
+							error = x.transpose() * edgeMatrix * x;
+						}
+						else
+						{
+							// 如果矩阵不可逆，则取边的两个端点和中点中误差最小的点
+							Eigen::Vector4d v1(heMesh.point(vertex1)[0], heMesh.point(vertex1)[1], heMesh.point(vertex1)[2], 1.0);
+							Eigen::Vector4d v2(heMesh.point(vertex2)[0], heMesh.point(vertex2)[1], heMesh.point(vertex2)[2], 1.0);
+							Eigen::Vector4d vmid = (v1 + v2) / 2;
+							double          e1   = v1.transpose() * edgeMatrix * v1;
+							double          e2   = v2.transpose() * edgeMatrix * v2;
+							double          e3   = vmid.transpose() * edgeMatrix * vmid;
+							if (e1 < error)
+							{
+								error = e1;
+								x     = v1;
+							}
+							if (e2 < error)
+							{
+								error = e2;
+								x     = v2;
+							}
+							if (e3 < error)
+							{
+								error = e3;
+								x     = vmid;
+							}
+						}
+						heMesh.property(edgeMatrixProp, edge) = make_pair(error, x);
+					}
+				}
+				if (heMesh.is_valid_handle(v1) || !heMesh.is_isolated(v1))
+				{
+					double         dError = 0;
+					QEMMesh::Point ptResult;
+					for (auto hIt = heMesh.voh_iter(v1); hIt.is_valid(); ++hIt)
+					{
+						OpenMesh::EdgeHandle edge = heMesh.edge_handle(*hIt);
+
+						if (!heMesh.is_valid_handle(*hIt) || heMesh.status(edge).deleted())
+						{
+							continue;
+						}
+						// 获取边的两个顶点
+						QEMMesh::HalfedgeHandle halfedge1 = heMesh.halfedge_handle(edge, 0);
+						QEMMesh::HalfedgeHandle halfedge2 = heMesh.halfedge_handle(edge, 1);
+
+						QEMMesh::VertexHandle vertex1 = heMesh.to_vertex_handle(halfedge1);
+						QEMMesh::VertexHandle vertex2 = heMesh.from_vertex_handle(halfedge1);
+
+						// 在这里使用 vertex1 和 vertex2，它们分别是边的两个顶点
+						Eigen::Matrix4d edgeMatrix = heMesh.property(vertMatrixProp, vertex1) + heMesh.property(vertMatrixProp, vertex2);
+						Eigen::Matrix4d mat;
+						mat << edgeMatrix(0, 0), edgeMatrix(0, 1), edgeMatrix(0, 2), edgeMatrix(0, 3),
+						    edgeMatrix(0, 1), edgeMatrix(1, 1), edgeMatrix(1, 2), edgeMatrix(1, 3),
+						    edgeMatrix(0, 2), edgeMatrix(1, 2), edgeMatrix(2, 2), edgeMatrix(2, 3),
+						    0, 0, 0, 1;
+						Eigen::Vector4d x(0, 0, 0, 0);
+						double          error = 10000;
+						if (checkInvertible(mat) && !heMesh.is_boundary(edge))
+						{
+							Eigen::Vector4d b(0, 0, 0, 1);
+							x     = mat.inverse() * b;
+							error = x.transpose() * edgeMatrix * x;
+						}
+						else
+						{
+							
+							// 如果矩阵不可逆，则取边的两个端点和中点中误差最小的点
+							Eigen::Vector4d v1(heMesh.point(vertex1)[0], heMesh.point(vertex1)[1], heMesh.point(vertex1)[2], 1.0);
+							Eigen::Vector4d v2(heMesh.point(vertex2)[0], heMesh.point(vertex2)[1], heMesh.point(vertex2)[2], 1.0);
+							Eigen::Vector4d vmid = (v1 + v2) / 2;
+							double          e1   = v1.transpose() * edgeMatrix * v1;
+							double          e2   = v2.transpose() * edgeMatrix * v2;
+							double          e3   = vmid.transpose() * edgeMatrix * vmid;
+							if (e1 < error)
+							{
+								error = e1;
+								x     = v1;
+							}
+							if (e2 < error)
+							{
+								error = e2;
+								x     = v2;
+							}
+							if (e3 < error)
+							{
+								error = e3;
+								x     = vmid;
+							}
+						}
+						heMesh.property(edgeMatrixProp, edge) = make_pair(error, x);
+					}
+				}
+				
+			}
+			if (nCurCollapses >= nCollapses)
+			{
+				cout << "cur : " << nCurCollapses << " col :" << nCollapses << endl;
+				break;
+			}
+				
 		}
 
-		heMesh.garbage_collection();
+		cout << "cur : " << nCurCollapses << " col :" << nCollapses << endl;
 
+		//auto targetEdge = heap.top();
+		//heap.pop();
+		//// 有效性检测
+		//// 
+		//QEMMesh::HalfedgeHandle heh1 = heMesh.halfedge_handle(targetEdge.second, 0);
+		//QEMMesh::HalfedgeHandle heh2 = heMesh.halfedge_handle(targetEdge.second, 1);
+		//
+		//
+		///*cout << "x : " << heMesh.point(heMesh.to_vertex_handle(heh1))[0] << " y: " << heMesh.point(heMesh.to_vertex_handle(heh1))[1] << " z : " << heMesh.point(heMesh.to_vertex_handle(heh1))[2] << endl;
+		//cout << "x : " << heMesh.point(heMesh.from_vertex_handle(heh1))[0] << " y: " << heMesh.point(heMesh.from_vertex_handle(heh1))[1] << " z : " << heMesh.point(heMesh.from_vertex_handle(heh1))[2] << endl;*/
+		//
+		//
+		//QEMMesh::VertexHandle newVertex = heMesh.to_vertex_handle(heh1);
+		//Eigen::Vector3d       pos       = heMesh.property(edgeMatrixProp, heMesh.edge_handle(heh1)).second.segment<3>(0);
+		//QEMMesh::Point        p(pos.x(), pos.y(), pos.z());
+		//if (isFlipped(newVertex, heMesh.from_vertex_handle(heh1), p))
+		//{
+		//	
+		//}
+		//heMesh.collapse(heh1); 
+		//heMesh.set_point(newVertex, p);
+		///*cout << "new x : " << pos.x() << " new y : " << pos.y() << " new z : " << pos.z() << endl;*/
+		//heMesh.update_face_normals();
+		//heMesh.update_vertex_normals();
+		//int cnt = heMesh.n_vertices();
+		//while (!heap.empty() && heMesh.n_vertices() > targetFaceCount)
+		//{
+		//	heMesh.property(vertMatrixProp, newVertex) = updateVertexMatrix(newVertex);
+		//	//更新新顶点周围边的误差
+		//	for (QEMMesh::VertexEdgeIter e_it = heMesh.ve_iter(newVertex); e_it.is_valid(); ++e_it)
+		//	{
+		//		QEMMesh::EdgeHandle edge = *e_it;
+		//		if (heMesh.status(edge).deleted())
+		//			continue;
+		//		// 获取边的两个顶点
+		//		QEMMesh::HalfedgeHandle halfedge1 = heMesh.halfedge_handle(edge, 0);
+		//		QEMMesh::HalfedgeHandle halfedge2 = heMesh.halfedge_handle(edge, 1);
+
+		//		QEMMesh::VertexHandle vertex1 = heMesh.to_vertex_handle(halfedge1);
+		//		QEMMesh::VertexHandle vertex2 = heMesh.from_vertex_handle(halfedge1);
+
+		//		// 在这里使用 vertex1 和 vertex2，它们分别是边的两个顶点
+		//		Eigen::Matrix4d edgeMatrix = heMesh.property(vertMatrixProp, vertex1) + heMesh.property(vertMatrixProp, vertex2);
+		//		// cout << edgeMatrix << endl;
+		//		Eigen::Matrix4d mat;
+		//		mat << edgeMatrix(0, 0), edgeMatrix(0, 1), edgeMatrix(0, 2), edgeMatrix(0, 3),
+		//		    edgeMatrix(0, 1), edgeMatrix(1, 1), edgeMatrix(1, 2), edgeMatrix(1, 3),
+		//		    edgeMatrix(0, 2), edgeMatrix(1, 2), edgeMatrix(2, 2), edgeMatrix(2, 3),
+		//		    0, 0, 0, 1;
+		//		Eigen::Vector4d x(0, 0, 0, 0);
+		//		double          error = 10000;
+		//		if (checkInvertible(mat) && !heMesh.is_boundary(edge))
+		//		{
+		//			Eigen::Vector4d b(0, 0, 0, 1);
+		//			//x     = mat.colPivHouseholderQr().solve(b);
+		//			x     = mat.inverse() * b;
+		//			error = x.transpose() * edgeMatrix * x;
+		//		}
+		//		else
+		//		{
+		//			cout << "not invertible" << endl;
+		//			// 如果矩阵不可逆，则取边的两个端点和中点中误差最小的点
+		//			Eigen::Vector4d v1(heMesh.point(vertex1)[0], heMesh.point(vertex1)[1], heMesh.point(vertex1)[2], 1.0);
+		//			Eigen::Vector4d v2(heMesh.point(vertex2)[0], heMesh.point(vertex2)[1], heMesh.point(vertex2)[2], 1.0);
+		//			Eigen::Vector4d vmid = (v1 + v2) / 2;
+		//			double          e1   = v1.transpose() * edgeMatrix * v1;
+		//			double          e2   = v2.transpose() * edgeMatrix * v2;
+		//			double          e3   = vmid.transpose() * edgeMatrix * vmid;
+		//			if (e1 < error)
+		//			{
+		//				error = e1;
+		//				x     = v1;
+		//			}
+		//			if (e2 < error)
+		//			{
+		//				error = e2;
+		//				x     = v2;
+		//			}
+		//			if (e3 < error)
+		//			{
+		//				error = e3;
+		//				x     = vmid;
+		//			}
+		//		}
+		//		heMesh.property(edgeMatrixProp, edge) = make_pair(error, x);
+		//		heap.push(make_pair(error, edge));
+		//	}
+		//	auto targetEdge = heap.top();
+		//	// TODO 有效性检测
+		//	heap.pop();
+		//	if (heMesh.status(targetEdge.second).deleted())
+		//		continue;
+
+		//	heh1 = heMesh.halfedge_handle(targetEdge.second, 0);
+		//	/*cout << "x : " << heMesh.point(heMesh.to_vertex_handle(heh1))[0] << " y: " << heMesh.point(heMesh.to_vertex_handle(heh1))[1] << " z : " << heMesh.point(heMesh.to_vertex_handle(heh1))[2] << endl;
+		//	cout << "x : " << heMesh.point(heMesh.from_vertex_handle(heh1))[0] << " y: " << heMesh.point(heMesh.from_vertex_handle(heh1))[1] << " z : " << heMesh.point(heMesh.from_vertex_handle(heh1))[2] << endl;*/
+		//	heMesh.collapse(heh1);
+		//	--cnt;
+		//	if (cnt < targetFaceCount)
+		//		break;
+		//	newVertex = heMesh.to_vertex_handle(heh1);
+		//	Eigen::Vector3d       pos       = heMesh.property(edgeMatrixProp, heMesh.edge_handle(heh1)).second.segment<3>(0);
+		//	QEMMesh::Point        p(pos.x(), pos.y(), pos.z());
+		//	heMesh.set_point(newVertex, p);
+		//	/*cout << "new x : " << pos.x() << " new y : " << pos.y() << " new z : " << pos.z() << endl;*/
+		//	heMesh.update_face_normals();
+		//	heMesh.update_vertex_normals();
+
+		//}
+
+		heMesh.garbage_collection();
+		if (heMesh.has_vertex_status())
+			heMesh.release_vertex_status();
+		if (heMesh.has_face_status())
+			heMesh.release_face_status();
+		if (heMesh.has_edge_status())
+			heMesh.release_edge_status();
 		cout << "face count : " << heMesh.n_faces() << endl;
 		// write mesh to output.obj
 		try

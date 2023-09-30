@@ -99,7 +99,7 @@ Mesh MeshReduction::Reduction(string file, const Mesh &mesh, float ratio)
 	qem.ImportMesh(file,mesh);
 	// TODO: implement me
 	int targetCount = std::ceil(mesh.F.rows() * ratio);
-	qem.DoSimplification(QEM::SimplificationMode::Position, targetCount);
+	qem.DoSimplification(QEM::SimplificationMode::Position, ratio);
 	Mesh outputMesh = qem.ExportMesh();
 	outputMesh.texture = mesh.texture;
 	return outputMesh;
